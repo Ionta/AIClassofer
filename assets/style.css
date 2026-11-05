@@ -655,6 +655,10 @@ td.score {
   display: none !important;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .feature {
   display: flex;
   gap: 12px;

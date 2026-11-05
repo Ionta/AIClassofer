@@ -1,8 +1,10 @@
 /**
  * Нормализация, нарезка на окна и подсчёт оценок.
- * Порт логики app.py (Detector.analyze) на JavaScript.
+ * Порт логики app.py (Detector.analyze) на JavaScript +
+ * режим окон по предложениям (по умолчанию).
  */
 import { CONFIG } from './config.js';
+import { splitSentences, buildSentenceWindows, buildTokenWindows } from './sentences.js';
 
 /**
  * Правила нормализации из model/inference.json (версия 1).
@@ -59,27 +61,17 @@ export function countVisible(text) {
 }
 
 /**
- * Границы окон по токенам — как в app.py: шаг window, старт берётся из
- * смещения токена, дубликаты и выход за текст отбрасываются.
+ * Прежний режим: границы окон по токенам, как в app.py.
+ * Оставлен для сравнения с Python-версией.
  */
 export function splitWindows(text, offsets, windowTokens) {
-  const starts = [0];
-  for (let i = windowTokens; i < offsets.length; i += windowTokens) {
-    const at = offsets[i][0];
-    if (starts[starts.length - 1] < at && at < text.length) starts.push(at);
-  }
-  const bounds = starts.concat([text.length]);
-  const spans = [];
-  for (let i = 0; i < bounds.length - 1; i++) {
-    spans.push({ start: bounds[i], end: bounds[i + 1] });
-  }
-  return spans;
+  return buildTokenWindows(text, offsets.map((offset) => offset[0]), windowTokens);
 }
 
 export const NOTICE =
   'Экспериментальная оценка модели, не доказательство авторства. ' +
   'Процент — доля непробельных символов в подсвеченных окнах, а не установленная доля ИИ. ' +
-  'Классификатор обучен на целых текстах; разметка окон приблизительна и отдельно не валидирована.';
+  'Классификатор обучен на целых текстах; оценка коротких фрагментов менее надёжна и отдельно не валидирована.';
 
 export const OFFSET_UNIT = 'UTF-16 code units JS; конец не включён';
 
@@ -106,14 +98,21 @@ export class Detector {
   }
 
   /**
-   * @param {{text: string, threshold?: number, windowTokens?: number,
+   * @param {{text: string, threshold?: number,
+   *          windowMode?: 'sentences'|'tokens',
+   *          sentencesPerWindow?: number, windowTokens?: number, minWords?: number,
    *          onProgress?: (state: {done: number, total: number}) => void,
    *          signal?: AbortSignal}} options
    */
   async analyze(options) {
     const text = options.text;
     const threshold = options.threshold ?? CONFIG.threshold;
-    const windowTokens = options.windowTokens ?? CONFIG.windowTokens;
+    const mode = options.windowMode === 'tokens' ? 'tokens' : 'sentences';
+    const sentencesPerWindow = Math.floor(
+      options.sentencesPerWindow ?? CONFIG.sentencesPerWindow
+    );
+    const windowTokens = Math.floor(options.windowTokens ?? CONFIG.windowTokens);
+    const minWords = Math.floor(options.minWords ?? CONFIG.minWords);
     const onProgress = options.onProgress || (() => {});
     const signal = options.signal;
 
@@ -124,26 +123,44 @@ export class Detector {
     if (!(threshold >= 0.01 && threshold <= 0.99)) {
       throw new Error('Порог должен быть от 0.01 до 0.99.');
     }
-    if (!(windowTokens >= 64 && windowTokens <= 510)) {
+    if (!Number.isFinite(minWords) || minWords < 1 || minWords > 200) {
+      throw new Error('Минимум слов должен быть от 1 до 200.');
+    }
+    if (mode === 'sentences') {
+      if (!Number.isFinite(sentencesPerWindow) || sentencesPerWindow < 1 || sentencesPerWindow > 50) {
+        throw new Error('Количество предложений на окно — от 1 до 50.');
+      }
+    } else if (!Number.isFinite(windowTokens) || windowTokens < 64 || windowTokens > 510) {
       throw new Error('Окно должно быть от 64 до 510 токенов.');
     }
 
     const encoding = this.tokenizer.encode(text);
-    const windows = splitWindows(text, encoding.offsets, windowTokens);
+    const tokenStarts = encoding.offsets.map((offset) => offset[0]);
+    const windows =
+      mode === 'sentences'
+        ? buildSentenceWindows(text, splitSentences(text), tokenStarts, {
+            sentencesPerWindow,
+            maxTokens: CONFIG.maxWindowTokens,
+          })
+        : buildTokenWindows(text, tokenStarts, windowTokens);
+
     const spans = [];
     const total = windows.length;
     for (let index = 0; index < total; index++) {
       if (signal && signal.aborted) throw new DOMException('Отменено', 'AbortError');
-      const { start, end } = windows[index];
-      const segment = text.slice(start, end);
+      const window = windows[index];
+      const segment = text.slice(window.start, window.end);
       const words = countWords(segment);
       let score = null;
-      if (words >= CONFIG.minWordsPerWindow) {
+      if (words >= minWords) {
         score = await this.scoreSegment(segment);
       }
       spans.push({
-        start,
-        end,
+        start: window.start,
+        end: window.end,
+        sentences: window.sentences,
+        split: window.split,
+        words,
         score,
         flagged: score !== null && score >= threshold,
         status: score !== null ? 'scored' : 'insufficient_text',
@@ -162,10 +179,16 @@ export class Detector {
     }
     const round2 = (value) => Math.round(value * 100) / 100;
     return {
-      method: 'RuModernBERT ONNX, непересекающиеся окна по исходному тексту',
+      method:
+        mode === 'sentences'
+          ? `RuModernBERT ONNX, окна по ${sentencesPerWindow} предложениям (границы не рвут слова)`
+          : 'RuModernBERT ONNX, непересекающиеся окна по исходному тексту',
       model: { repo: CONFIG.repo, revision: CONFIG.revision },
       threshold,
-      window_tokens: windowTokens,
+      window_mode: mode,
+      sentences_per_window: mode === 'sentences' ? sentencesPerWindow : null,
+      window_tokens: mode === 'sentences' ? CONFIG.maxWindowTokens : windowTokens,
+      min_words: minWords,
       notice: NOTICE,
       offset_unit: OFFSET_UNIT,
       ai_enabled: this.aiEnabled,
@@ -176,3 +199,5 @@ export class Detector {
     };
   }
 }
+
+export { splitSentences };

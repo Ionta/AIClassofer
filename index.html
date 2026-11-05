@@ -6,7 +6,7 @@
     <title>AI Text Lab · проверка текста на ИИ-признаки в браузере</title>
     <meta
       name="description"
-      content="Локальная проверка русскоязычного текста на ИИ-признаки: модель работает в браузере, текст не покидает устройство. Открытая модель RuModernBERT и механические проверки."
+      content="Локальная проверка русскоязычного текста на ИИ-признаки: модель работает в браузере, текст не покидает устройство. Классификация по целым предложениям, открытая модель RuModernBERT и механические проверки."
     />
     <meta name="theme-color" content="#6355d9" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236355d9'/%3E%3Ctext x='50%25' y='56%25' font-family='Arial' font-size='30' fill='white' text-anchor='middle'%3EAa%3C/text%3E%3C/svg%3E" />
@@ -32,7 +32,8 @@
         <p class="lede">
           Вставьте текст или загрузите DOCX/TXT. Модель скачивается один раз и работает
           на вашем устройстве через WebAssembly: текст не отправляется на сервер, запросы
-          к внешним API не выполняются.
+          к внешним API не выполняются. Классификация идёт по целым предложениям — вы
+          указываете, сколько предложений брать за раз.
         </p>
 
         <div class="grid">
@@ -72,15 +73,34 @@
             </label>
 
             <details>
-              <summary>Настройки модели</summary>
+              <summary>Настройки анализа</summary>
+              <label class="field">
+                Как резать текст на окна
+                <select id="window-mode">
+                  <option value="sentences">По предложениям — не рвёт слова и фразы</option>
+                  <option value="tokens">По токенам — как в Python-версии</option>
+                </select>
+              </label>
+              <div class="cols" data-mode="sentences">
+                <label class="field">
+                  Предложений на окно
+                  <input id="sentences" type="number" value="3" min="1" max="20" step="1" />
+                </label>
+              </div>
+              <div class="cols" data-mode="tokens" hidden>
+                <label class="field">
+                  Размер окна, токены
+                  <input id="window" type="number" value="384" min="64" max="510" step="1" />
+                </label>
+              </div>
               <div class="cols">
                 <label class="field">
                   Порог подсветки
                   <input id="threshold" type="number" value="0.8" min="0.01" max="0.99" step="0.01" />
                 </label>
                 <label class="field">
-                  Размер окна, токены
-                  <input id="window" type="number" value="384" min="64" max="510" step="1" />
+                  Минимум слов в окне
+                  <input id="min-words" type="number" value="8" min="1" max="200" step="1" />
                 </label>
               </div>
               <div class="cols">
@@ -99,9 +119,11 @@
                   </select>
                 </label>
               </div>
-              <p class="hint">
-                Меньшее окно даёт более мелкие фрагменты, но может ухудшать точность.
-                Оценки модели не калиброваны как вероятность авторства.
+              <p class="hint" id="mode-hint">
+                Окно — это несколько целых предложений подряд, поэтому подсветка не рвётся
+                посреди слова. Если предложение длиннее контекста модели, оно делится по токенам
+                и помечается в таблице. Окна короче «минимума слов» не оцениваются: по умолчанию
+                8 слов для предложений и 20 для токенов.
               </p>
             </details>
 

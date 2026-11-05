@@ -25,12 +25,17 @@ export const CONFIG = {
   ortVersion: '1.23.0',
   ortBase: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/',
 
-  // Параметры анализа по умолчанию (как в Python-версии).
+  // Параметры анализа по умолчанию.
+  // Основной режим — окна по предложениям: границы не рвут слова и фразы.
   threshold: 0.8,
+  windowMode: 'sentences',
+  sentencesPerWindow: 3,
+  minWords: 8,
+  minWordsByMode: { sentences: 8, tokens: 20 },
   windowTokens: 384,
+  maxWindowTokens: 500,
   maxChars: 200000,
   maxFileBytes: 10 * 1024 * 1024,
-  minWordsPerWindow: 20,
 
   // Ограничения модели: 512 позиций, из них 2 служебных токена.
   maxSequence: 512,

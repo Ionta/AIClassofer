@@ -124,6 +124,9 @@ export function reportBody(result, options = {}) {
     manual: [],
   };
   const doc = result.document || { filename: 'Текст', kind: 'text', warnings: [] };
+  const sentenceMode = result.window_mode !== 'tokens';
+  const perWindow = result.sentences_per_window || 3;
+  const minWords = result.min_words ?? 20;
   const total = result.text.length;
   const words = countWords(result.text);
   const ai = result.highlighted_share;
@@ -177,8 +180,11 @@ export function reportBody(result, options = {}) {
     .map((span, index) => {
       const score = span.score === null ? 'Недостаточно текста' : span.score.toFixed(3);
       const verdict = span.flagged ? 'ИИ-признаки' : span.score === null ? 'Не оценено' : 'Ниже порога';
+      const sentences = sentenceMode
+        ? `<td>${span.sentences ? (span.split ? '1 (длинное)' : span.sentences) : '—'}</td>`
+        : '';
       return (
-        `<tr><td>${index + 1}</td><td>${span.start}–${span.end}</td>` +
+        `<tr><td>${index + 1}</td><td>${span.start}–${span.end}</td>${sentences}` +
         `<td class="score">${escapeHtml(score)}</td><td>${escapeHtml(verdict)}</td></tr>`
       );
     })
@@ -194,6 +200,12 @@ export function reportBody(result, options = {}) {
   const warnings = (doc.warnings || [])
     .map((warning) => `<p class="notice info">${escapeHtml(warning)}</p>`)
     .join('');
+
+  const unscored = (result.spans || []).filter((span) => span.score === null).length;
+  const unscoredNotice = unscored
+    ? `<p class="notice">${unscored} из ${(result.spans || []).length} окон короче ${minWords} слов и не оценены. ` +
+      'Увеличьте число предложений на окно или уменьшите «Минимум слов в окне» в настройках.</p>'
+    : '';
 
   const truncated = audit.mechanics_truncated
     ? '<p class="notice">Механических замечаний больше 1500: в списке показаны первые 1500 найденных мест, счётчик включает все совпадения.</p>'
@@ -233,8 +245,12 @@ export function reportBody(result, options = {}) {
     '<span><i class="swatch" style="background:#ffa5a0"></i>≥ 0,97</span>' +
     '<span><i class="swatch" style="background:#d9d2fa"></i>Механика / структура</span>' +
     '</div>' +
-    '<p class="hint">Наведите курсор на подсветку, чтобы увидеть замечание. Окно короче 20 слов не оценивается. ' +
-    'Неподсвеченный текст также может быть сгенерирован.</p>' +
+    '<p class="hint">Наведите курсор на подсветку, чтобы увидеть замечание. ' +
+    (sentenceMode
+      ? `Окно — до ${perWindow} целых предложений (не больше ${result.window_tokens} токенов), поэтому слова и фразы не разрываются. `
+      : 'Окно режется по токенам и может пересекать слова и предложения. ') +
+    `Окно короче ${minWords} слов не оценивается. Неподсвеченный текст также может быть сгенерирован.</p>` +
+    unscoredNotice +
     `<article class="document">${highlight(result)}</article></section>` +
     `<section id="compliance" class="card"><h2>Проверки структуры и механики</h2>` +
     `<p class="hint">${escapeHtml(summary)}</p>${warnings}` +
@@ -248,13 +264,18 @@ export function reportBody(result, options = {}) {
     '</ul></section>' +
     `<section id="method" class="card"><h2>Как получен результат</h2>` +
     `<p class="hint">Модель: ${escapeHtml(MODEL_INFO.repo)}<br>Ревизия: ${escapeHtml(MODEL_INFO.revision)}<br>` +
-    `Порог: ${escapeHtml(String(result.threshold))} · окно: ${escapeHtml(String(result.window_tokens))} токенов. ` +
+    `Порог: ${escapeHtml(String(result.threshold))} · ` +
+    (sentenceMode
+      ? `окно: до ${perWindow} предложений (не больше ${escapeHtml(String(result.window_tokens))} токенов). `
+      : `окно: ${escapeHtml(String(result.window_tokens))} токенов. `) +
     'Оценка softmax не калибрована как вероятность авторства.</p>' +
     '<p class="hint">Процент — доля непробельных символов в окнах выше порога. Окна идут по токенам и могут ' +
     'пересекать слова и предложения. Позиции в таблице — индексы UTF-16 JS, конец не включён. ' +
     'Проверка не определяет плагиат и не заменяет нормоконтроль кафедры.</p>' +
     `<details><summary>Оценки всех фрагментов (${(result.spans || []).length})</summary>` +
-    '<div class="table-wrap"><table><thead><tr><th>Окно</th><th>Позиции</th><th>Оценка модели</th><th>Результат</th></tr></thead>' +
+    '<div class="table-wrap"><table><thead><tr><th>Окно</th><th>Позиции</th>' +
+    (sentenceMode ? '<th>Предложений</th>' : '') +
+    '<th>Оценка модели</th><th>Результат</th></tr></thead>' +
     `<tbody>${spanRows}</tbody></table></div></details></section>` +
     '</div><aside class="sticky card report-side"><h2>Что поправить</h2>' +
     '<p class="hint">Откройте место в тексте и проверьте рекомендацию по контексту.</p>' +

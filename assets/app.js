@@ -20,6 +20,10 @@ const els = {
   fileStatus: $('#file-status'),
   dropzone: $('#dropzone'),
   encoding: $('#encoding'),
+  windowMode: $('#window-mode'),
+  sentences: $('#sentences'),
+  minWords: $('#min-words'),
+  modeHint: $('#mode-hint'),
   threshold: $('#threshold'),
   window: $('#window'),
   precision: $('#precision'),
@@ -156,13 +160,25 @@ function buildResult(document, analysis) {
 async function runAnalysis() {
   if (state.busy) return;
   clearError();
+  const mode = els.windowMode.value === 'tokens' ? 'tokens' : 'sentences';
   const threshold = Number(els.threshold.value);
   const windowTokens = Number(els.window.value);
+  const sentencesPerWindow = Number(els.sentences.value);
+  const minWords = Number(els.minWords.value);
   if (!Number.isFinite(threshold) || threshold < 0.01 || threshold > 0.99) {
     showError('Порог должен быть числом от 0.01 до 0.99.');
     return;
   }
-  if (!Number.isInteger(windowTokens) || windowTokens < 64 || windowTokens > 510) {
+  if (!Number.isInteger(minWords) || minWords < 1 || minWords > 200) {
+    showError('Минимум слов должен быть целым числом от 1 до 200.');
+    return;
+  }
+  if (mode === 'sentences') {
+    if (!Number.isInteger(sentencesPerWindow) || sentencesPerWindow < 1 || sentencesPerWindow > 20) {
+      showError('Количество предложений на окно — целое число от 1 до 20.');
+      return;
+    }
+  } else if (!Number.isInteger(windowTokens) || windowTokens < 64 || windowTokens > 510) {
     showError('Размер окна должен быть целым числом от 64 до 510.');
     return;
   }
@@ -189,7 +205,10 @@ async function runAnalysis() {
     const analysis = await detector.analyze({
       text: document.text,
       threshold,
+      windowMode: mode,
+      sentencesPerWindow,
       windowTokens,
+      minWords,
       signal: state.controller.signal,
       onProgress: ({ done, total }) => {
         const percent = 6 + (92 * done) / total;
@@ -321,6 +340,34 @@ els.file.addEventListener('change', () => {
 els.text.addEventListener('input', () => {
   if (els.text.value.trim() && state.file) setFile(null);
 });
+
+const MODE_HINTS = {
+  sentences:
+    'Окно — это несколько целых предложений подряд, поэтому подсветка не рвётся посреди слова. ' +
+    'Если предложение длиннее контекста модели, оно делится по токенам и помечается в таблице. ' +
+    'Окна короче «минимума слов» не оцениваются: по умолчанию 8 слов для предложений и 20 для токенов.',
+  tokens:
+    'Окно режется по токенам, как в Python-версии: границы могут попадать внутрь слова или фразы. ' +
+    'Режим оставлен для сравнения результатов; минимум слов по умолчанию — 20.',
+};
+
+function applyWindowMode() {
+  const mode = els.windowMode.value === 'tokens' ? 'tokens' : 'sentences';
+  for (const block of document.querySelectorAll('[data-mode]')) {
+    block.hidden = block.dataset.mode !== mode;
+  }
+  if (els.modeHint) els.modeHint.textContent = MODE_HINTS[mode];
+  if (!els.minWords.dataset.edited) {
+    const fallback = mode === 'tokens' ? 20 : 8;
+    els.minWords.value = String((CONFIG.minWordsByMode && CONFIG.minWordsByMode[mode]) ?? fallback);
+  }
+}
+
+els.windowMode.addEventListener('change', applyWindowMode);
+els.minWords.addEventListener('input', () => {
+  els.minWords.dataset.edited = '1';
+});
+applyWindowMode();
 
 for (const type of ['dragenter', 'dragover']) {
   els.dropzone.addEventListener(type, (event) => {
