@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Text Lab · проверка текста на ИИ-признаки в браузере</title>
+    <meta
+      name="description"
+      content="Локальная проверка русскоязычного текста на ИИ-признаки: модель работает в браузере, текст не покидает устройство. Открытая модель RuModernBERT и механические проверки."
+    />
+    <meta name="theme-color" content="#6355d9" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236355d9'/%3E%3Ctext x='50%25' y='56%25' font-family='Arial' font-size='30' fill='white' text-anchor='middle'%3EAa%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./">
+        <span class="brand-icon">Aa</span>
+        AI Text Lab
+        <span class="tag">БРАУЗЕР</span>
+      </a>
+      <span class="privacy">● Текст не покидает ваш компьютер</span>
+    </header>
+
+    <main class="container">
+      <noscript>
+        <p class="notice error">Для работы нужен JavaScript: модель выполняется прямо в браузере.</p>
+      </noscript>
+      <section id="intro">
+        <div class="eyebrow">Статичная версия · GitHub Pages</div>
+        <h1>Проверка текста на ИИ-признаки прямо в браузере</h1>
+        <p class="lede">
+          Вставьте текст или загрузите DOCX/TXT. Модель скачивается один раз и работает
+          на вашем устройстве через WebAssembly: текст не отправляется на сервер, запросы
+          к внешним API не выполняются.
+        </p>
+
+        <div class="grid">
+          <form id="analysis-form" class="card" novalidate>
+            <h2><span class="tag">01</span> Добавьте работу</h2>
+
+            <div class="dropzone" id="dropzone">
+              <span class="upload-icon" aria-hidden="true">↥</span>
+              <div class="dropzone-body">
+                <label class="dropzone-title" for="file">Выберите файл Word или текстовый документ</label>
+                <span class="hint" id="file-status">DOCX или TXT · до 10 МБ</span>
+              </div>
+              <label class="button secondary small" for="file">Обзор…</label>
+              <input id="file" name="file" type="file" accept=".docx,.txt" class="sr-only" />
+            </div>
+
+            <label class="field" for="text">Или вставьте текст</label>
+            <textarea
+              id="text"
+              name="text"
+              maxlength="200000"
+              placeholder="Введение, глава или вся работа…"
+            ></textarea>
+            <p class="hint">
+              До 200 000 символов. Если выбран файл, анализируется файл. Для подсветки
+              ИИ-признаков формат DOCX не обязателен: текст извлекается в браузере.
+            </p>
+
+            <label class="field">
+              Кодировка TXT
+              <select id="encoding" name="encoding">
+                <option value="auto">Авто: UTF-8 / UTF-16 с BOM</option>
+                <option value="utf-8">UTF-8</option>
+                <option value="utf-16le">UTF-16 LE</option>
+                <option value="windows-1251">Windows-1251</option>
+              </select>
+            </label>
+
+            <details>
+              <summary>Настройки модели</summary>
+              <div class="cols">
+                <label class="field">
+                  Порог подсветки
+                  <input id="threshold" type="number" value="0.8" min="0.01" max="0.99" step="0.01" />
+                </label>
+                <label class="field">
+                  Размер окна, токены
+                  <input id="window" type="number" value="384" min="64" max="510" step="1" />
+                </label>
+              </div>
+              <div class="cols">
+                <label class="field">
+                  Точность весов
+                  <select id="precision">
+                    <option value="int8">int8 · 36 МБ · быстрее</option>
+                    <option value="fp32">fp32 · 140 МБ · как в Python-версии</option>
+                  </select>
+                </label>
+                <label class="field">
+                  Вычисления
+                  <select id="backend">
+                    <option value="wasm">WASM (CPU) — надёжно</option>
+                    <option value="auto">Авто: WebGPU, затем WASM</option>
+                  </select>
+                </label>
+              </div>
+              <p class="hint">
+                Меньшее окно даёт более мелкие фрагменты, но может ухудшать точность.
+                Оценки модели не калиброваны как вероятность авторства.
+              </p>
+            </details>
+
+            <p id="error" class="notice error hidden" role="alert"></p>
+
+            <div class="actions">
+              <button id="analyze" type="submit">Проверить работу →</button>
+              <button id="cancel" type="button" class="secondary hidden">Отмена</button>
+            </div>
+
+            <div class="progress-wrap hidden" id="progress-wrap">
+              <div class="progress"><i id="progress-bar"></i></div>
+              <p class="status" id="status" role="status" aria-live="polite">Готовим модель…</p>
+            </div>
+          </form>
+
+          <aside>
+            <section class="card tint">
+              <div class="eyebrow">Как это работает</div>
+              <div class="feature">
+                <div class="feature-number">01</div>
+                <div>
+                  <b>Веса с Hugging Face</b>
+                  <span>Закреплённая ревизия модели, 36 или 140 МБ, кэшируется браузером.</span>
+                </div>
+              </div>
+              <div class="feature">
+                <div class="feature-number">02</div>
+                <div>
+                  <b>Токенизация на JS</b>
+                  <span>Тот же tokenizer.json, что в Python-версии, без WASM-токенизатора.</span>
+                </div>
+              </div>
+              <div class="feature">
+                <div class="feature-number">03</div>
+                <div>
+                  <b>Инференс через onnxruntime-web</b>
+                  <span>Модель выполняется в вашем браузере, текст никуда не уходит.</span>
+                </div>
+              </div>
+              <div class="feature">
+                <div class="feature-number">04</div>
+                <div>
+                  <b>Отчёт и экспорт</b>
+                  <span>Карта текста, механические замечания, JSON или печать в PDF.</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <h3>Авторство требует контекста</h3>
+              <p class="hint">
+                Модель отмечает похожие фрагменты и может ошибаться. Подсветка помогает
+                перечитать текст; решение об авторстве по ней принимать нельзя.
+              </p>
+              <h3>Это статичная версия</h3>
+              <p class="hint">
+                Нормоконтроль оформления DOCX (шрифты, поля, интервалы) остался в
+                Python-версии приложения: в браузере он не переносился.
+              </p>
+            </section>
+          </aside>
+        </div>
+
+        <p class="footer">
+          Модель: toiletsandpaper/russian-ai-text-detector-modernbert (Apache-2.0),
+          закреплённая ревизия. Сайт не собирает статистику и не отправляет текст на сервер.
+          Скачанные отчёты содержат полный исходный текст.
+        </p>
+      </section>
+
+      <section id="report" class="hidden"></section>
+    </main>
+
+    <script type="module" src="assets/app.js"></script>
+  </body>
+</html>
