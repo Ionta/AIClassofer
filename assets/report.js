@@ -1,5 +1,6 @@
 /**
  * Сборка разметки отчёта и автономного HTML-файла.
+ * Отчёт содержит только результат проверки на ИИ-признаки.
  * Все пользовательские строки экранируются.
  */
 import { countWords } from './analyze.js';
@@ -16,73 +17,34 @@ export function escapeHtml(value) {
 
 const numberFormat = new Intl.NumberFormat('ru-RU');
 
-/** Карта текста: подсветка окон модели и механических замечаний. */
+/** Карта текста: подсветка окон модели. */
 export function highlight(result) {
   const text = result.text;
   const spans = result.spans || [];
-  const issues = (result.audit && result.audit.issues) || [];
-  const events = new Map();
-  for (const issue of issues) {
-    const start = issue.start;
-    const end = issue.end;
-    if (start === null || end === null || start === undefined || end === undefined || start >= end) continue;
-    if (!events.has(start)) events.set(start, []);
-    events.get(start).push({ add: true, issue });
-    if (!events.has(end)) events.set(end, []);
-    events.get(end).push({ add: false, issue });
-  }
-  const boundaries = new Set([0, text.length]);
-  for (const key of events.keys()) boundaries.add(key);
+  const points = new Set([0, text.length]);
   for (const span of spans) {
-    boundaries.add(span.start);
-    boundaries.add(span.end);
+    points.add(span.start);
+    points.add(span.end);
   }
-  const points = [...boundaries].sort((a, b) => a - b);
-  const active = new Map();
-  const anchored = new Set();
+  const sorted = [...points].sort((a, b) => a - b);
   const parts = [];
-  let spanIndex = 0;
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const from = points[i];
-    const to = points[i + 1];
-    for (const event of events.get(from) || []) {
-      if (event.add) active.set(event.issue.id, event.issue);
-      else active.delete(event.issue.id);
-    }
-    while (spanIndex + 1 < spans.length && spans[spanIndex].end <= from) spanIndex += 1;
-    const span = spans[spanIndex] && spans[spanIndex].start <= from && from < spans[spanIndex].end
-      ? spans[spanIndex]
-      : null;
-
-    const classes = [];
-    const labels = [];
+  let index = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const from = sorted[i];
+    const to = sorted[i + 1];
+    while (index + 1 < spans.length && spans[index].end <= from) index += 1;
+    const span =
+      spans[index] && spans[index].start <= from && from < spans[index].end ? spans[index] : null;
+    const value = escapeHtml(text.slice(from, to));
     if (span && span.flagged) {
       const score = span.score;
-      classes.push(score >= 0.97 ? 'ai-vhigh' : score >= 0.9 ? 'ai-high' : 'ai-medium');
-      labels.push(
-        `ИИ-признаки · оценка модели ${score.toFixed(3)} (не вероятность авторства)`
-      );
-    }
-    const values = [...active.values()];
-    if (values.some((issue) => issue.category === 'mechanical')) classes.push('mechanical');
-    if (values.some((issue) => issue.category === 'formatting')) classes.push('formatting');
-    for (const issue of values.slice(0, 6)) labels.push(`${issue.title}: ${issue.message}`);
-
-    let anchors = '';
-    for (const issue of values) {
-      if (!anchored.has(issue.id)) {
-        anchors += `<span id="text-${issue.id}"></span>`;
-        anchored.add(issue.id);
-      }
-    }
-    const value = escapeHtml(text.slice(from, to));
-    if (classes.length) {
+      const className = score >= 0.97 ? 'ai-vhigh' : score >= 0.9 ? 'ai-high' : 'ai-medium';
+      const title = `ИИ-признаки · оценка модели ${score.toFixed(3)} (не вероятность авторства)`;
       parts.push(
-        `${anchors}<mark class="highlight ${classes.join(' ')}" title="${escapeHtml(labels.join(' · '))}">${value}</mark>`
+        `<mark class="highlight ${className}" title="${escapeHtml(title)}">${value}</mark>`
       );
     } else {
-      parts.push(anchors + value);
+      parts.push(value);
     }
   }
   return parts.join('');
@@ -100,42 +62,26 @@ function stat(label, value, description, bar) {
   );
 }
 
-const CATEGORY_NAMES = {
-  mechanical: 'Механика',
-  formatting: 'Оформление',
-  structure: 'Структура',
-};
-
-const STATUS_NAMES = {
-  pass: 'Соответствует',
-  fail: 'Отклонение',
-  unknown: 'Не проверено',
-  review: 'Проверьте вручную',
-};
-
 export function reportBody(result, options = {}) {
   const interactive = options.interactive !== false;
-  const audit = result.audit || {
-    issues: [],
-    checks: [],
-    status_counts: {},
-    mechanical_total: 0,
-    structure_total: 0,
-    manual: [],
-  };
   const doc = result.document || { filename: 'Текст', kind: 'text', warnings: [] };
   const sentenceMode = result.window_mode !== 'tokens';
   const perWindow = result.sentences_per_window || 3;
   const minWords = result.min_words ?? 20;
+  const spans = result.spans || [];
   const total = result.text.length;
   const words = countWords(result.text);
-  const ai = result.highlighted_share;
+  const assessedShare = result.assessed_share ?? 0;
   const aiLabel = result.ai_enabled === false
     ? 'Отключено'
-    : !result.assessed_share
+    : !assessedShare
       ? 'Нет оценки'
-      : (ai === null ? '—' : `${ai}%`);
-  const flaggedWindows = (result.spans || []).filter((span) => span.flagged).length;
+      : result.highlighted_share === null
+        ? '—'
+        : `${result.highlighted_share}%`;
+  const flaggedWindows = spans.filter((span) => span.flagged).length;
+  const unscored = spans.filter((span) => span.score === null).length;
+
   const actions = interactive
     ? '<div class="actions no-print">' +
       '<button type="button" class="secondary small" data-action="new">← Новая проверка</button>' +
@@ -145,38 +91,16 @@ export function reportBody(result, options = {}) {
       '</div>'
     : '';
 
-  const issuesHtml = [];
-  for (const issue of audit.issues) {
-    const category = CATEGORY_NAMES[issue.category] || issue.category;
-    const anchor = issue.start === null || issue.start === undefined
-      ? ''
-      : `<blockquote>${escapeHtml(
-          result.text.slice(
-            Math.max(0, issue.start - 35),
-            Math.min(total, Math.max(issue.end, issue.start + 70))
-          )
-        )}</blockquote><a href="#text-${issue.id}">К месту в тексте ↑</a>`;
-    issuesHtml.push(
-      `<div class="issue" id="issue-${issue.id}" data-category="${escapeHtml(issue.category)}">` +
-        `<span class="tag review">${escapeHtml(category)}</span>` +
-        `<h3>${escapeHtml(issue.title)}</h3>` +
-        `<p>${escapeHtml(issue.message)}</p>${anchor}</div>`
-    );
-  }
+  const unscoredNotice = unscored
+    ? `<p class="notice">${unscored} из ${spans.length} окон короче ${minWords} слов и не оценены. ` +
+      'Увеличьте число предложений на окно или уменьшите «Минимум слов в окне» в настройках.</p>'
+    : '';
 
-  const checkRows = audit.checks
-    .map(
-      (check) =>
-        '<tr>' +
-        `<td>${escapeHtml(check.title)}</td>` +
-        `<td>${escapeHtml(check.actual === null || check.actual === undefined ? 'Не удалось определить' : check.actual)}</td>` +
-        `<td>${escapeHtml(check.expected)}</td>` +
-        `<td><span class="tag ${escapeHtml(check.status)}">${escapeHtml(STATUS_NAMES[check.status] || check.status)}</span></td>` +
-        '</tr>'
-    )
+  const warnings = (doc.warnings || [])
+    .map((warning) => `<p class="notice info">${escapeHtml(warning)}</p>`)
     .join('');
 
-  const spanRows = (result.spans || [])
+  const spanRows = spans
     .map((span, index) => {
       const score = span.score === null ? 'Недостаточно текста' : span.score.toFixed(3);
       const verdict = span.flagged ? 'ИИ-признаки' : span.score === null ? 'Не оценено' : 'Ниже порога';
@@ -190,35 +114,6 @@ export function reportBody(result, options = {}) {
     })
     .join('');
 
-  const counts = audit.status_counts || {};
-  const summary = ['pass', 'fail', 'unknown', 'review']
-    .map((key) => `${counts[key] || 0} ${
-      { pass: 'соответствует', fail: 'отклонений', unknown: 'не проверено', review: 'для ручной проверки' }[key]
-    }`)
-    .join(' · ');
-
-  const warnings = (doc.warnings || [])
-    .map((warning) => `<p class="notice info">${escapeHtml(warning)}</p>`)
-    .join('');
-
-  const unscored = (result.spans || []).filter((span) => span.score === null).length;
-  const unscoredNotice = unscored
-    ? `<p class="notice">${unscored} из ${(result.spans || []).length} окон короче ${minWords} слов и не оценены. ` +
-      'Увеличьте число предложений на окно или уменьшите «Минимум слов в окне» в настройках.</p>'
-    : '';
-
-  const truncated = audit.mechanics_truncated
-    ? '<p class="notice">Механических замечаний больше 1500: в списке показаны первые 1500 найденных мест, счётчик включает все совпадения.</p>'
-    : '';
-
-  const filters = interactive
-    ? '<div class="filters no-print">' +
-      '<button type="button" class="filter" data-filter="all" aria-pressed="true">Все</button>' +
-      '<button type="button" class="filter" data-filter="mechanical" aria-pressed="false">Механика</button>' +
-      '<button type="button" class="filter" data-filter="structure" aria-pressed="false">Структура</button>' +
-      '</div>'
-    : '';
-
   return (
     '<div class="section-head"><div class="eyebrow">' +
     `Результаты проверки / ${escapeHtml(result.created_at || '')}</div>${actions}</div>` +
@@ -227,41 +122,32 @@ export function reportBody(result, options = {}) {
     `<p class="hint">${numberFormat.format(words)} слов · ${numberFormat.format(total)} символов · ` +
     `${escapeHtml((doc.kind || 'text').toUpperCase())}</p>` +
     '<div class="stats">' +
-    stat('ИИ-признаки', aiLabel, `${flaggedWindows} подсвеченных окон`, ai || 0) +
-    stat('Оценено моделью', `${result.assessed_share}%`, 'от непробельных символов', result.assessed_share) +
-    stat('Механические замечания', String(audit.mechanical_total || 0), 'мест для внимательной вычитки') +
-    stat('Структура', String(audit.structure_total || 0), 'замечаний по разделам') +
+    stat('ИИ-признаки', aiLabel, 'доля непробельных символов выше порога', result.highlighted_share || 0) +
+    stat('Оценено моделью', `${assessedShare}%`, 'от непробельных символов', assessedShare) +
+    stat(
+      'Подсвечено окон',
+      `${flaggedWindows} из ${spans.length}`,
+      sentenceMode ? `окна по ${perWindow} предложениям` : 'окна по токенам'
+    ) +
     '</div>' +
     `<p class="notice">${escapeHtml(result.notice)}</p>` +
     '<nav class="report-nav no-print">' +
-    '<a href="#text-map">01 / Карта текста</a><a href="#compliance">02 / Проверки</a>' +
-    '<a href="#method">03 / Метод и ограничения</a></nav>' +
-    '<div class="grid"><div>' +
+    '<a href="#text-map">01 / Карта текста</a><a href="#method">02 / Метод и ограничения</a></nav>' +
+    '<div class="report-single">' +
     `<section id="text-map" class="card"><div class="section-head"><h2>Карта текста</h2>` +
     `<span class="tag">${flaggedWindows} окон с ИИ-признаками</span></div>` +
     '<div class="legend">' +
     '<span><i class="swatch" style="background:#ffecbb"></i>Выше порога</span>' +
     '<span><i class="swatch" style="background:#ffc5a8"></i>≥ 0,90</span>' +
     '<span><i class="swatch" style="background:#ffa5a0"></i>≥ 0,97</span>' +
-    '<span><i class="swatch" style="background:#d9d2fa"></i>Механика / структура</span>' +
     '</div>' +
-    '<p class="hint">Наведите курсор на подсветку, чтобы увидеть замечание. ' +
+    '<p class="hint">Наведите курсор на подсветку, чтобы увидеть оценку окна. ' +
     (sentenceMode
       ? `Окно — до ${perWindow} целых предложений (не больше ${result.window_tokens} токенов), поэтому слова и фразы не разрываются. `
       : 'Окно режется по токенам и может пересекать слова и предложения. ') +
     `Окно короче ${minWords} слов не оценивается. Неподсвеченный текст также может быть сгенерирован.</p>` +
     unscoredNotice +
     `<article class="document">${highlight(result)}</article></section>` +
-    `<section id="compliance" class="card"><h2>Проверки структуры и механики</h2>` +
-    `<p class="hint">${escapeHtml(summary)}</p>${warnings}` +
-    '<p class="hint">Проверка оформления DOCX (шрифты, поля, интервалы) в этой веб-версии не выполняется: ' +
-    'она осталась в Python-приложении.</p>' +
-    `<details><summary>Все измерения и результаты (${audit.checks.length})</summary>` +
-    '<div class="table-wrap"><table><thead><tr><th>Параметр</th><th>В документе</th><th>Ожидается</th><th>Статус</th></tr></thead>' +
-    `<tbody>${checkRows}</tbody></table></div></details></section>` +
-    `<section class="card"><h2>Перед сдачей проверьте вручную</h2><ul class="checklist">` +
-    (audit.manual || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('') +
-    '</ul></section>' +
     `<section id="method" class="card"><h2>Как получен результат</h2>` +
     `<p class="hint">Модель: ${escapeHtml(MODEL_INFO.repo)}<br>Ревизия: ${escapeHtml(MODEL_INFO.revision)}<br>` +
     `Порог: ${escapeHtml(String(result.threshold))} · ` +
@@ -269,22 +155,15 @@ export function reportBody(result, options = {}) {
       ? `окно: до ${perWindow} предложений (не больше ${escapeHtml(String(result.window_tokens))} токенов). `
       : `окно: ${escapeHtml(String(result.window_tokens))} токенов. `) +
     'Оценка softmax не калибрована как вероятность авторства.</p>' +
-    '<p class="hint">Процент — доля непробельных символов в окнах выше порога. Окна идут по токенам и могут ' +
-    'пересекать слова и предложения. Позиции в таблице — индексы UTF-16 JS, конец не включён. ' +
-    'Проверка не определяет плагиат и не заменяет нормоконтроль кафедры.</p>' +
-    `<details><summary>Оценки всех фрагментов (${(result.spans || []).length})</summary>` +
+    '<p class="hint">Процент — доля непробельных символов в окнах выше порога. Позиции в таблице — ' +
+    'индексы UTF-16 JS, конец не включён. Проверка не определяет плагиат и не подтверждает авторство; ' +
+    'оформление, орфография и структура работы не проверяются.</p>' +
+    `<details><summary>Оценки всех фрагментов (${spans.length})</summary>` +
     '<div class="table-wrap"><table><thead><tr><th>Окно</th><th>Позиции</th>' +
     (sentenceMode ? '<th>Предложений</th>' : '') +
     '<th>Оценка модели</th><th>Результат</th></tr></thead>' +
     `<tbody>${spanRows}</tbody></table></div></details></section>` +
-    '</div><aside class="sticky card report-side"><h2>Что поправить</h2>' +
-    '<p class="hint">Откройте место в тексте и проверьте рекомендацию по контексту.</p>' +
-    filters +
-    truncated +
-    (issuesHtml.length
-      ? issuesHtml.join('')
-      : '<p class="hint">Замечаний по выполненным проверкам не найдено. Проверьте пункты, требующие ручного просмотра.</p>') +
-    '</aside></div>' +
+    '</div>' +
     '<footer class="footer">AI Text Lab · статичная версия. Отчёт содержит полный исходный текст. ' +
     'Для сохранения PDF используйте печать браузера с включённой фоновой графикой.</footer>'
   );

@@ -449,14 +449,6 @@ summary {
   background: #ffa5a0;
 }
 
-mark.mechanical {
-  box-shadow: inset 0 -2px 0 #a98ef0;
-}
-
-mark.formatting {
-  background: #d9d2fa;
-}
-
 .legend {
   display: flex;
   gap: 14px;
@@ -476,91 +468,8 @@ mark.formatting {
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.issue {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 10px;
-  background: #fff;
-}
-
-.issue h3 {
-  margin: 6px 0 4px;
-  font-size: 14.5px;
-}
-
-.issue p {
-  margin: 0 0 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.issue blockquote {
-  margin: 8px 0;
-  padding: 8px 10px;
-  border-left: 3px solid var(--line);
-  color: var(--muted);
-  font-size: 12.5px;
-  background: #fafaff;
-  border-radius: 0 8px 8px 0;
-  overflow-wrap: anywhere;
-}
-
-.filters {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 10px 0 14px;
-}
-
-.filter {
-  padding: 6px 12px;
-  border-radius: 100px;
-  border: 1px solid var(--line);
-  background: #fff;
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.filter[aria-pressed='true'] {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
-}
-
 .tag {
   display: inline-block;
-}
-
-.tag.pass,
-.tag.fail,
-.tag.unknown,
-.tag.review {
-  font-size: 11px;
-  letter-spacing: 0;
-  text-transform: none;
-  font-weight: 700;
-}
-
-.tag.pass {
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.tag.fail {
-  background: #fdeaea;
-  color: var(--red);
-}
-
-.tag.unknown {
-  background: #f0f0f5;
-  color: var(--muted);
-}
-
-.tag.review {
-  background: var(--purple-soft);
-  color: var(--purple);
 }
 
 .table-wrap {
@@ -593,20 +502,8 @@ td.score {
   font-variant-numeric: tabular-nums;
 }
 
-.checklist {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--muted);
-  font-size: 13.5px;
-}
-
-.checklist li {
-  margin-bottom: 6px;
-}
-
-.sticky {
-  position: sticky;
-  top: 16px;
+.report-single {
+  max-width: 1000px;
 }
 
 .report-nav {
@@ -688,9 +585,6 @@ td.score {
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: 1fr;
-  }
-  .sticky {
-    position: static;
   }
   .container {
     padding: 24px 16px 56px;

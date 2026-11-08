@@ -5,7 +5,6 @@ import { CONFIG } from './config.js';
 import { ByteLevelTokenizer } from './tokenizer.js';
 import { Detector } from './analyze.js';
 import { Engine, resolveAsset, fetchWithProgress } from './engine.js';
-import { audit } from './checks.js';
 import { readFile, textDocument } from './documents.js';
 import { renderReport, buildStandaloneHtml, formatDate } from './report.js';
 
@@ -152,7 +151,6 @@ function buildResult(document, analysis) {
     paragraphs: document.paragraphs,
     warnings: document.warnings,
   };
-  result.audit = audit(document, null);
   result.created_at = formatDate();
   return result;
 }
@@ -255,7 +253,7 @@ async function getCssText() {
       '.container{max-width:900px;margin:auto;padding:24px}.card{margin:0 0 18px}' +
       '.document{white-space:pre-wrap;line-height:1.7}mark.ai-medium{background:#ffecbb}' +
       'mark.ai-high{background:#ffc5a8}mark.ai-vhigh{background:#ffa5a0}' +
-      'mark.mechanical{box-shadow:inset 0 -2px 0 #a98ef0}.hidden{display:none}' +
+      '.hidden{display:none}' +
       'table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e4e4ee;padding:6px 8px;text-align:left}';
   }
   return state.cssText;
@@ -303,15 +301,6 @@ function showIntro() {
   els.intro.classList.remove('hidden');
   els.progressWrap.classList.add('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function applyFilter(category) {
-  for (const button of els.report.querySelectorAll('[data-filter]')) {
-    button.setAttribute('aria-pressed', String(button.dataset.filter === category));
-  }
-  for (const issue of els.report.querySelectorAll('.issue[data-category]')) {
-    issue.hidden = category !== 'all' && issue.dataset.category !== category;
-  }
 }
 
 function setFile(file) {
@@ -388,16 +377,12 @@ els.dropzone.addEventListener('drop', (event) => {
 
 els.report.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]');
-  if (action) {
-    const name = action.dataset.action;
-    if (name === 'new') showIntro();
-    if (name === 'html') exportHtml();
-    if (name === 'json') exportJson();
-    if (name === 'print') window.print();
-    return;
-  }
-  const filter = event.target.closest('[data-filter]');
-  if (filter) applyFilter(filter.dataset.filter);
+  if (!action) return;
+  const name = action.dataset.action;
+  if (name === 'new') showIntro();
+  if (name === 'html') exportHtml();
+  if (name === 'json') exportJson();
+  if (name === 'print') window.print();
 });
 
 window.addEventListener('beforeprint', () => {
